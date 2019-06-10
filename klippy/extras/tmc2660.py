@@ -169,11 +169,13 @@ class TMC2660CurrentHelper:
         return vsense, cs
 
     def handle_printing(self, print_time):
-        self.set_current(0., self.current) # workaround
+        self.printer.get_reactor().register_callback(
+            (lambda ev: self.set_current(0., self.current))) # workaround
 
     def handle_ready(self, print_time):
-        self.set_current(print_time, (float(self.idle_current_percentage)
-                                      * self.current / 100))
+        current = self.current * float(self.idle_current_percentage) / 100.
+        self.printer.get_reactor().register_callback(
+            (lambda ev: self.set_current(print_time, current)))
 
     def set_current(self, print_time, current):
         vsense, cs = self._calc_current(current)
@@ -203,6 +205,7 @@ class TMC2660CurrentHelper:
 class MCU_TMC2660_SPI:
     def __init__(self, config, name_to_reg, fields):
         self.printer = config.get_printer()
+        self.mutex = self.printer.get_reactor().mutex()
         self.spi = bus.MCU_SPI_from_config(config, 0, default_speed=4000000)
         self.name_to_reg = name_to_reg
         self.fields = fields
@@ -211,17 +214,19 @@ class MCU_TMC2660_SPI:
     def get_register(self, reg_name):
         reg = self.name_to_reg["DRVCONF"]
         val = self.fields.set_field("RDSEL", ReadRegisters.index(reg_name))
+        msg = [((val >> 16) | reg) & 0xff, (val >> 8) & 0xff, val & 0xff]
         if self.printer.get_start_args().get('debugoutput') is not None:
             return 0
-        params = self.spi.spi_transfer([((val >> 16) | reg) & 0xff,
-                                        (val >> 8) & 0xff, val & 0xff])
+        with self.mutex:
+            params = self.spi.spi_transfer(msg)
         pr = bytearray(params['response'])
         return (pr[0] << 16) | (pr[1] << 8) | pr[2]
     def set_register(self, reg_name, val, print_time=0.):
         min_clock = self.spi.get_mcu().print_time_to_clock(print_time)
         reg = self.name_to_reg[reg_name]
-        self.spi.spi_send([((val >> 16) | reg) & 0xff,
-                            (val >> 8) & 0xff, val & 0xff], min_clock)
+        msg = [((val >> 16) | reg) & 0xff, (val >> 8) & 0xff, val & 0xff]
+        with self.mutex:
+            self.spi.spi_send(msg, min_clock)
 
 
 ######################################################################
