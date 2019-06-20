@@ -24,8 +24,12 @@ polar_stepper_angle_calc_position(struct stepper_kinematics *sk, struct move *m
 {
     struct coord c = move_get_coord(m, move_time);
     // XXX - handle x==y==0
-    // XXX - handle angle wrapping
-    return atan2(c.y, c.x);
+    double angle = atan2(c.y, c.x);
+    if (angle - sk->commanded_pos > M_PI)
+        angle -= 2. * M_PI;
+    else if (angle - sk->commanded_pos < -M_PI)
+        angle += 2. * M_PI;
+    return angle;
 }
 
 struct stepper_kinematics * __visible
